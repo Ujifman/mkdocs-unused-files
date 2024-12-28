@@ -8,14 +8,16 @@ from bs4 import BeautifulSoup
 
 log = logging.getLogger('mkdocs')
 
+
 class UnusedFilesPlugin(BasePlugin):
 
     file_list = []
 
     config_scheme = (
         ('dir', config_options.Type(str, default='')),
-        ('file_types',config_options.Type((str, list), default=[])),
+        ('file_types', config_options.Type((str, list), default=[])),
         ('excluded_files', config_options.Type((str, list), default=[])),
+        ('excluded_dirs', config_options.Type((str, list), default=[])),
         ('strict', config_options.Type(bool, default=False)),
         ('enabled', config_options.Type(bool, default=True)),
     )
@@ -36,26 +38,50 @@ class UnusedFilesPlugin(BasePlugin):
         if not self.config['enabled']:
             return
         # Disable plugin when the documentation is served, i.e., "mkdocs serve" is used
-        if command == "serve":
+        if command == 'serve':
             self.config['enabled'] = False
-            log.info("Unused-files plugin disabled while MkDocs is running in 'serve' mode.")
+            log.info(
+                "Unused-files plugin disabled while MkDocs is running in 'serve' mode."
+            )
 
     def on_files(self, files, config):
         dir = os.path.join(config.docs_dir, self.config['dir'])
-        # Get all files in directory
+        # Prepare list of excluded dirs' relative paths, according to
+        # platform path separator
+        excluded_dirs = [
+            os.path.join(*entry.split('/'))
+            for entry in self.config['excluded_dirs']
+        ]
+        # Iterate recursively in directory
         for path, _, files in os.walk(dir):
+            # Check and exclude whole dir if it is in excluded dirs
+            rel_dir_path = os.path.relpath(path, config.docs_dir)
+            is_excluded = False
+            for entry in excluded_dirs:
+                if rel_dir_path.startswith(entry):
+                    is_excluded = True
+                    break
+
+            if is_excluded:
+                continue
+
             for file in files:
                 # Add all files with the given types to file_list
                 # If no types were given, add all files except Markdown files
-                if not file.endswith("md") and self._matches_type(file):
+                if not file.endswith('md') and self._matches_type(file):
                     # Create entry from relative path between full path and docs_dir + filename
                     # When path and docs_dir are identical, relpath returns ".". We use normpath() to resolve that
-                    entry = os.path.normpath(os.path.join(os.path.relpath(path, config.docs_dir), file))
+                    entry = os.path.normpath(
+                        os.path.join(
+                            os.path.relpath(path, config.docs_dir), file
+                        )
+                    )
                     # Check whether file is excluded
                     is_excluded = False
                     for excluded_file in self.config['excluded_files']:
                         if fnmatch(file, excluded_file):
                             is_excluded = True
+                            break
                     if is_excluded:
                         continue
                     self.file_list.append(entry)
@@ -83,5 +109,8 @@ class UnusedFilesPlugin(BasePlugin):
         if self.config['strict']:
             logger = log.warning
         if self.file_list:
-            logger('The following files exist in the docs directory, but may be unused:\n  - {}'.format('\n  - '.join(self.file_list)))
-
+            logger(
+                'The following files exist in the docs directory, but may be unused:\n  - {}'.format(
+                    '\n  - '.join(self.file_list)
+                )
+            )
